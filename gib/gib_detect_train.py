@@ -3,73 +3,102 @@
 import math
 import pickle
 
-accepted_chars = 'abcdefghijklmnopqrstuvwxyz '
+# Define the accepted characters for the model
+ACCEPTED_CHARS = 'abcdefghijklmnopqrstuvwxyz '
 
-pos = dict([(char, idx) for idx, char in enumerate(accepted_chars)])
+# Create a mapping of characters to their indices
+POS = {char: idx for idx, char in enumerate(ACCEPTED_CHARS)}
+
 
 def normalize(line):
-    """ Return only the subset of chars from accepted_chars.
-    This helps keep the  model relatively small by ignoring punctuation, 
-    infrequenty symbols, etc. """
-    return [c.lower() for c in line if c.lower() in accepted_chars]
+    """
+    Normalize the input by filtering only accepted characters.
+    This reduces the model size by ignoring punctuation and infrequent symbols.
+    """
+    return [c.lower() for c in line if c.lower() in ACCEPTED_CHARS]
 
-def ngram(n, l):
-    """ Return all n grams from l after normalizing """
-    filtered = normalize(l)
-    for start in range(0, len(filtered) - n + 1):
+
+def ngram(n, text):
+    """
+    Generate n-grams from the input text after normalizing.
+    
+    Args:
+        n (int): Length of the n-gram.
+        text (str): Input text.
+        
+    Yields:
+        str: n-grams of the input text.
+    """
+    filtered = normalize(text)
+    for start in range(len(filtered) - n + 1):
         yield ''.join(filtered[start:start + n])
 
-def train():
-    """ Write a simple model as a pickle file """
-    k = len(accepted_chars)
-    # Assume we have seen 10 of each character pair.  This acts as a kind of
-    # prior or smoothing factor.  This way, if we see a character transition
-    # live that we've never observed in the past, we won't assume the entire
-    # string has 0 probability.
-    counts = [[10 for i in range(k)] for i in range(k)]
 
-    # Count transitions from big text file, taken 
-    # from http://norvig.com/spell-correct.html
-    for line in open('big.txt'):
-        for a, b in ngram(2, line):
-            counts[pos[a]][pos[b]] += 1
+def avg_transition_prob(text, log_prob_mat):
+    """
+    Calculate the average transition probability of the text using the bigram model.
 
-    # Normalize the counts so that they become log probabilities.  
-    # We use log probabilities rather than straight probabilities to avoid
-    # numeric underflow issues with long texts.
-    # This contains a justification:
-    # http://squarecog.wordpress.com/2009/01/10/dealing-with-underflow-in-joint-probability-calculations/
-    for i, row in enumerate(counts):
-        s = float(sum(row))
-        for j in range(len(row)):
-            row[j] = math.log(row[j] / s)
+    Args:
+        text (str): Input text to analyze.
+        log_prob_mat (list): Log probability matrix for bigram transitions.
 
-    # Find the probability of generating a few arbitrarily choosen good and
-    # bad phrases.
-    good_probs = [avg_transition_prob(l, counts) for l in open('good.txt')]
-    bad_probs = [avg_transition_prob(l, counts) for l in open('bad.txt')]
-
-    # Assert that we actually are capable of detecting the junk.
-    assert min(good_probs) > max(bad_probs)
-
-    # And pick a threshold halfway between the worst good and best bad inputs.
-    thresh = (min(good_probs) + max(bad_probs)) / 2
-    pickle.dump({'mat': counts, 'thresh': thresh}, open('gib_model.pki', 'wb'))
-
-def avg_transition_prob(l, log_prob_mat):
-    """ Return the average transition prob from l through log_prob_mat. """
+    Returns:
+        float: Average transition probability.
+    """
     log_prob = 0.0
     transition_ct = 0
-    for a, b in ngram(2, l):
-        log_prob += log_prob_mat[pos[a]][pos[b]]
+
+    for a, b in ngram(2, text):
+        log_prob += log_prob_mat[POS[a]][POS[b]]
         transition_ct += 1
-    # The exponentiation translates from log probs to probs.
+
+    # Convert log probabilities back to probabilities
     return math.exp(log_prob / (transition_ct or 1))
+
+
+def train():
+    """
+    Train the bigram model and save it as a pickle file.
+    """
+    k = len(ACCEPTED_CHARS)
+
+    # Initialize bigram counts with smoothing (prior of 10 for each pair)
+    counts = [[10 for _ in range(k)] for _ in range(k)]
+
+    # Count bigram transitions from a large text corpus
+    with open('big.txt', 'r') as f:
+        for line in f:
+            for a, b in ngram(2, line):
+                counts[POS[a]][POS[b]] += 1
+
+    # Normalize the counts to log probabilities
+    for i, row in enumerate(counts):
+        row_sum = float(sum(row))
+        for j in range(len(row)):
+            row[j] = math.log(row[j] / row_sum)
+
+    # Evaluate good and bad phrases
+    good_probs = []
+    with open('good.txt', 'r') as f:
+        good_probs = [avg_transition_prob(line, counts) for line in f]
+
+    bad_probs = []
+    with open('bad.txt', 'r') as f:
+        bad_probs = [avg_transition_prob(line, counts) for line in f]
+
+    # Ensure the model can distinguish good from bad phrases
+    assert min(good_probs) > max(bad_probs), "Model failed to distinguish good and bad phrases."
+
+    # Calculate the threshold between good and bad inputs
+    thresh = (min(good_probs) + max(bad_probs)) / 2
+
+    # Save the model
+    model = {'mat': counts, 'thresh': thresh}
+    with open('gib_model.pki', 'wb') as f:
+        pickle.dump(model, f)
+
+    print("Model training complete. Saved as 'gib_model.pki'.")
+
 
 if __name__ == '__main__':
     train()
-
-
-
-    
-    
